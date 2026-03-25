@@ -1,9 +1,45 @@
 run = "gunicorn app:app --bind 0.0.0.0:5050 --workers 2 --timeout 120"
 entrypoint = "app.py"
+modules = ["python-3.11"]
 
 [deployment]
 run = ["sh", "-c", "gunicorn app:app --bind 0.0.0.0:${PORT:-5050} --workers 2 --timeout 120"]
 
 [[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
 localPort = 5050
 externalPort = 80
+
+[agent]
+expertMode = true
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "gunicorn app:app --bind 0.0.0.0:5000 --workers 2 --timeout 120"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[nix]
+channel = "stable-25_05"
+packages = ["freetype", "glibcLocales", "lcms2", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "pkg-config", "tcl", "tk", "xsimd", "zlib"]
