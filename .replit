@@ -1,0 +1,9 @@
+run = "gunicorn app:app --bind 0.0.0.0:5050 --workers 2 --timeout 120"
+entrypoint = "app.py"
+
+[deployment]
+run = ["sh", "-c", "gunicorn app:app --bind 0.0.0.0:${PORT:-5050} --workers 2 --timeout 120"]
+
+[[ports]]
+localPort = 5050
+externalPort = 80

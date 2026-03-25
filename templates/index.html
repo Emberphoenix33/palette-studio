@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#1a1a2e">
+    <title>Artist Drae Studio</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header>
+        <h1>Artist Drae Studio</h1>
+    </header>
+
+    <!-- Upload screen (shown first, before tabs) -->
+    <div id="upload-screen" class="upload-screen">
+        <div class="upload-card">
+            <h2>Single Photo</h2>
+            <div class="upload-zone" id="upload-zone">
+                <input type="file" id="image-input" accept="image/*" capture="environment" hidden>
+                <p>Tap to upload a pet photo</p>
+            </div>
+        </div>
+        <div class="upload-card">
+            <h2>Collage</h2>
+            <p class="hint">Combine multiple pets — backgrounds removed automatically</p>
+            <div class="upload-zone" id="collage-zone">
+                <input type="file" id="collage-input" accept="image/*" multiple hidden>
+                <p>Tap to select 2–4 photos</p>
+            </div>
+            <div id="collage-preview" class="hidden">
+                <canvas id="collage-canvas" style="touch-action:none"></canvas>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:8px">
+                    <button id="collage-use-btn" class="btn">Use This Collage</button>
+                    <button id="collage-reset-btn" class="btn btn-small">Reset</button>
+                </div>
+                <p class="hint" style="margin-top:8px">Drag pets to position. Pinch to resize. Tap to select &amp; bring forward.</p>
+            </div>
+        </div>
+    </div>
+
+    <main class="hidden" id="main-app">
+        <!-- Reference Tab -->
+        <section id="tab-reference" class="tab-content active">
+            <div class="section-card">
+                <div class="ref-toolbar">
+                    <button id="flip-btn" class="btn btn-small">Flip</button>
+                    <button id="grayscale-btn" class="btn btn-small">Grayscale</button>
+                    <button id="sketch-btn" class="btn btn-small">Sketch</button>
+                    <button id="change-photo-btn" class="btn btn-small">New Photo</button>
+                </div>
+                <div class="ref-controls hidden" id="sketch-controls">
+                    <label>Detail: <input type="range" id="sketch-detail" min="1" max="10" value="5"><span id="sketch-detail-val">5</span></label>
+                </div>
+                <div class="ref-controls">
+                    <label>Grid: <input type="range" id="grid-divisions" min="2" max="12" value="4"><span id="grid-divisions-val">4</span></label>
+                    <label>Line color: <input type="color" id="overlay-color" value="#ffffff"></label>
+                    <label>Opacity: <input type="range" id="overlay-opacity" min="20" max="100" value="70"><span id="overlay-opacity-val">70%</span></label>
+                </div>
+                <div class="ref-controls">
+                    <label>Contrast: <input type="range" id="ref-contrast" min="0" max="200" value="100"><span id="ref-contrast-val">100%</span></label>
+                    <label>Brightness: <input type="range" id="ref-brightness" min="0" max="200" value="100"><span id="ref-brightness-val">100%</span></label>
+                </div>
+                <div class="ref-canvas-wrap">
+                    <canvas id="ref-canvas"></canvas>
+                </div>
+                <p class="hint" id="zoom-hint">Tap a grid square to zoom in</p>
+                <div id="zoom-view" class="hidden">
+                    <canvas id="zoom-canvas"></canvas>
+                    <button id="zoom-back-btn" class="btn btn-small">Back to full view</button>
+                </div>
+                <button class="btn btn-small export-btn" data-canvas="ref-canvas">Save Gridded Image</button>
+            </div>
+
+            <div class="section-card">
+                <h2>Progress Comparison</h2>
+                <p class="hint">Upload a photo of your canvas to compare with the reference</p>
+                <input type="file" id="progress-input" accept="image/*" capture="environment" hidden>
+                <button id="progress-upload-btn" class="btn btn-small">Upload Progress Photo</button>
+                <div id="progress-compare" class="hidden" style="margin-top:12px">
+                    <div style="position:relative;overflow:hidden;border-radius:12px" id="compare-container">
+                        <canvas id="compare-canvas"></canvas>
+                        <input type="range" id="compare-slider" min="0" max="100" value="50" style="width:100%;margin-top:8px">
+                    </div>
+                    <p class="hint" style="margin-top:4px">Slide to compare reference (left) with progress (right)</p>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- Palette Tab -->
+        <section id="tab-palette" class="tab-content">
+            <div class="section-card">
+                <h2>Extracted Colors</h2>
+                <div class="extract-controls">
+                    <label>Colors: <input type="range" id="n-colors" min="2" max="12" value="6"><span id="n-colors-val">6</span></label>
+                    <button id="re-extract-btn" class="btn btn-small">Re-extract</button>
+                </div>
+                <div id="extracted-palette" class="palette-row"></div>
+            </div>
+
+            <div class="section-card">
+                <h2>Active Palette</h2>
+                <p class="hint">Tap colors above to add to your working palette</p>
+                <div id="active-palette" class="palette-row active-palette"></div>
+                <button id="clear-palette-btn" class="btn btn-small">Clear</button>
+            </div>
+
+            <div class="section-card">
+                <h2>Eyedropper</h2>
+                <p class="hint">Pick a color from the reference photo</p>
+                <button id="eyedropper-btn" class="btn btn-small">Pick Color</button>
+                <div id="eyedropper-panel" class="hidden" style="margin-top:12px">
+                    <div style="display:flex;align-items:center;gap:12px">
+                        <div id="eyedrop-swatch" style="width:48px;height:48px;border-radius:12px;border:2px solid var(--border);flex-shrink:0"></div>
+                        <div>
+                            <div id="eyedrop-hex" style="font-weight:700;font-size:16px"></div>
+                            <div id="eyedrop-pigment" style="font-size:13px;color:var(--text-muted)"></div>
+                        </div>
+                        <button id="eyedrop-add-btn" class="btn btn-small" style="margin-left:auto">Add to Palette</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section-card">
+                <h2>Color Map</h2>
+                <p class="hint">Shows where each palette color goes on the photo</p>
+                <button id="colormap-btn" class="btn btn-small">Generate Color Map</button>
+                <button id="original-btn" class="btn btn-small hidden">Show Original</button>
+                <div id="colormap-container" class="hidden">
+                    <canvas id="colormap-canvas"></canvas>
+                    <div id="colormap-legend" class="colormap-legend"></div>
+                    <button class="btn btn-small export-btn" data-canvas="colormap-canvas">Save Image</button>
+                </div>
+            </div>
+
+            <div class="section-card">
+                <h2>Value Map</h2>
+                <p class="hint">Tonal study — shows light/dark regions as numbered value bands</p>
+                <div class="extract-controls">
+                    <label>Levels: <input type="range" id="value-levels" min="3" max="7" value="5"><span id="value-levels-val">5</span></label>
+                    <button id="valuemap-btn" class="btn btn-small">Generate Value Map</button>
+                </div>
+                <div id="valuemap-container" class="hidden">
+                    <canvas id="valuemap-canvas"></canvas>
+                    <div id="valuemap-legend" class="colormap-legend"></div>
+                    <button class="btn btn-small export-btn" data-canvas="valuemap-canvas">Save Image</button>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- Paint Tab -->
+        <section id="tab-paint" class="tab-content">
+            <div class="section-card">
+                <h2>Mixing Suggestions</h2>
+                <p class="hint">How to mix each color in your active palette</p>
+                <div id="mix-suggestions"></div>
+            </div>
+
+            <div class="section-card">
+                <h2>Pigment Reference</h2>
+                <div id="pigment-list" class="pigment-grid"></div>
+            </div>
+        </section>
+
+        <!-- Timer Tab -->
+        <section id="tab-timer" class="tab-content">
+            <div class="section-card">
+                <h2>Session Timer</h2>
+                <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+                    <span id="timer-display" style="font-size:28px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:1px">00:00:00</span>
+                    <button id="timer-start-btn" class="btn btn-small">Start</button>
+                    <button id="timer-done-btn" class="btn btn-small">Done for Today</button>
+                    <button id="timer-reset-btn" class="btn btn-small">Reset</button>
+                </div>
+                <div id="session-log" class="hidden" style="margin-top:16px">
+                    <h3 style="font-size:14px;font-weight:600;margin-bottom:8px">Session Log</h3>
+                    <div id="session-entries"></div>
+                    <div style="display:flex;align-items:center;gap:12px;margin-top:12px">
+                        <span style="font-weight:700;font-size:14px">Total: <span id="session-total">00:00:00</span></span>
+                        <button id="session-clear-btn" class="btn btn-small">Clear All</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <nav class="tab-bar hidden" id="tab-bar">
+        <button class="tab-btn active" data-tab="reference">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2"/><line x1="8" y1="2" x2="8" y2="22"/><line x1="16" y1="2" x2="16" y2="22"/><line x1="2" y1="8" x2="22" y2="8"/><line x1="2" y1="16" x2="22" y2="16"/></svg>
+            <span>Reference</span>
+        </button>
+        <button class="tab-btn" data-tab="palette">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="8" r="2"/><circle cx="8" cy="14" r="2"/><circle cx="16" cy="14" r="2"/></svg>
+            <span>Palette</span>
+        </button>
+        <button class="tab-btn" data-tab="paint">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 3H5a2 2 0 00-2 2v2a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2z"/><path d="M12 9v12"/><path d="M8 21h8"/></svg>
+            <span>Paint</span>
+        </button>
+        <button class="tab-btn" data-tab="timer">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M9 1h6"/><path d="M12 1v2"/></svg>
+            <span>Timer</span>
+        </button>
+    </nav>
+
+    <script src="/static/js/color-utils.js"></script>
+    <script src="/static/js/pigments.js"></script>
+    <script src="/static/js/palette.js"></script>
+    <script src="/static/js/grids.js"></script>
+    <script src="/static/js/composition.js"></script>
+    <script src="/static/js/app.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/sw.js');
+        }
+    </script>
+</body>
+</html>
