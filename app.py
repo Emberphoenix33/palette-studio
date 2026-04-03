@@ -243,52 +243,6 @@ def get_sketch(image_id):
     return send_file(BytesIO(buf.tobytes()), mimetype="image/png")
 
 
-@app.route("/remove-bg", methods=["POST"])
-def remove_bg():
-    """Remove background from an image using rembg (U2Net), return transparent PNG."""
-    if "image" not in request.files:
-        return jsonify({"error": "No image"}), 400
-
-    from rembg import remove
-    from PIL import Image
-    import cv2
-    import numpy as np
-
-    file = request.files["image"]
-    image_bytes = file.read()
-
-    # Open with Pillow
-    img = Image.open(BytesIO(image_bytes)).convert("RGBA")
-
-    # Resize for speed if very large
-    max_dim = 1024
-    if max(img.size) > max_dim:
-        ratio = max_dim / max(img.size)
-        img = img.resize((int(img.width * ratio), int(img.height * ratio)), Image.LANCZOS)
-
-    # Remove background with rembg
-    result = remove(img)
-
-    # Crop to content bounding box
-    arr = np.array(result)
-    alpha = arr[:, :, 3]
-    coords = np.argwhere(alpha > 10)
-    if len(coords) > 0:
-        y0, x0 = coords.min(axis=0)
-        y1, x1 = coords.max(axis=0) + 1
-        pad = 5
-        y0 = max(0, y0 - pad)
-        x0 = max(0, x0 - pad)
-        y1 = min(arr.shape[0], y1 + pad)
-        x1 = min(arr.shape[1], x1 + pad)
-        result = result.crop((x0, y0, x1, y1))
-
-    buf = BytesIO()
-    result.save(buf, format="PNG")
-    buf.seek(0)
-    return send_file(buf, mimetype="image/png")
-
-
 @app.route("/valuemap/<image_id>")
 def get_valuemap(image_id):
     if image_id not in image_store:

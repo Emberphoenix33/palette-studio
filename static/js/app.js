@@ -89,18 +89,15 @@ const App = {
     },
 
     async processCollage(files) {
-        this.showToast('Removing backgrounds...');
+        this.showToast('Removing backgrounds (first time may take a moment)...');
         document.getElementById('collage-zone').querySelector('p').textContent = 'Processing...';
 
-        // Send each image to server for background removal
+        // Client-side background removal using @imgly/background-removal
+        const { removeBackground } = await import('https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.5.5/+esm');
         const cutouts = [];
         for (const file of files) {
-            const formData = new FormData();
-            formData.append('image', file);
             try {
-                const resp = await fetch('/remove-bg', { method: 'POST', body: formData });
-                if (!resp.ok) throw new Error();
-                const blob = await resp.blob();
+                const blob = await removeBackground(file);
                 const url = URL.createObjectURL(blob);
                 const img = await new Promise((resolve, reject) => {
                     const i = new Image();
