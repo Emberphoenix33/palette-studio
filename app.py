@@ -256,9 +256,9 @@ def get_sketch(image_id):
     import cv2
     import numpy as np
 
-    # Detail level: 1 (minimal/clean) to 10 (maximum detail)
+    # Detail level: 1 (minimal/clean) to 20 (maximum detail)
     detail = request.args.get("detail", 5, type=int)
-    detail = max(1, min(10, detail))
+    detail = max(1, min(20, detail))
     suppression = request.args.get("suppression", 5, type=int)
     suppression = max(1, min(10, suppression))
     thickness = request.args.get("thickness", 2, type=int)

@@ -19,6 +19,7 @@ const App = {
     _timerSeconds: 0,
     _timerRunning: false,
     _progressImage: null,
+    _pendingCanvasTap: null,
 
     init() {
         this.setupUpload();
@@ -555,24 +556,32 @@ const App = {
         // Tap grid square to zoom (or eyedropper)
         const refCanvas = document.getElementById('ref-canvas');
         refCanvas.addEventListener('click', (e) => {
-            if (this._eyedropperMode) {
-                this._pickColor(refCanvas, e);
+            if (this._pendingCanvasTap?.target === refCanvas) {
+                this._pendingCanvasTap = null;
                 return;
             }
-            const cell = Composition.hitTestGrid(refCanvas, e.clientX, e.clientY);
-            if (cell) {
-                Composition.zoomedCell = cell;
-                document.getElementById('zoom-hint').classList.add('hidden');
-                document.getElementById('zoom-view').classList.remove('hidden');
-                refCanvas.parentElement.classList.add('hidden');
-                Composition.renderZoomed(document.getElementById('zoom-canvas'));
-            }
+            this.handleReferenceTap(refCanvas, e.clientX, e.clientY);
+        });
+
+        this.setupCanvasTap(refCanvas, ({ clientX, clientY }) => {
+            this.handleReferenceTap(refCanvas, clientX, clientY);
         });
 
         // Eyedropper on zoom canvas too
-        document.getElementById('zoom-canvas').addEventListener('click', (e) => {
+        const zoomCanvas = document.getElementById('zoom-canvas');
+        zoomCanvas.addEventListener('click', (e) => {
+            if (this._pendingCanvasTap?.target === zoomCanvas) {
+                this._pendingCanvasTap = null;
+                return;
+            }
             if (this._eyedropperMode) {
-                this._pickColor(document.getElementById('zoom-canvas'), e);
+                this._pickColor(zoomCanvas, e);
+            }
+        });
+
+        this.setupCanvasTap(zoomCanvas, ({ clientX, clientY }) => {
+            if (this._eyedropperMode) {
+                this._pickColor(zoomCanvas, { clientX, clientY });
             }
         });
 
@@ -616,6 +625,62 @@ const App = {
         } else {
             Composition.render(document.getElementById('ref-canvas'));
         }
+    },
+
+    handleReferenceTap(canvas, clientX, clientY) {
+        if (this._eyedropperMode) {
+            this._pickColor(canvas, { clientX, clientY });
+            return;
+        }
+
+        const cell = Composition.hitTestGrid(canvas, clientX, clientY);
+        if (!cell) return;
+
+        Composition.zoomedCell = cell;
+        document.getElementById('zoom-hint').classList.add('hidden');
+        document.getElementById('zoom-view').classList.remove('hidden');
+        canvas.parentElement.classList.add('hidden');
+        Composition.renderZoomed(document.getElementById('zoom-canvas'));
+    },
+
+    setupCanvasTap(canvas, onTap) {
+        let startPoint = null;
+        const moveThreshold = 12;
+
+        canvas.addEventListener('touchstart', (e) => {
+            if (e.touches.length !== 1) {
+                startPoint = null;
+                return;
+            }
+
+            const touch = e.touches[0];
+            startPoint = { clientX: touch.clientX, clientY: touch.clientY };
+        }, { passive: true });
+
+        canvas.addEventListener('touchmove', (e) => {
+            if (!startPoint || e.touches.length !== 1) {
+                startPoint = null;
+                return;
+            }
+
+            const touch = e.touches[0];
+            const moved = Math.hypot(touch.clientX - startPoint.clientX, touch.clientY - startPoint.clientY);
+            if (moved > moveThreshold) {
+                startPoint = null;
+            }
+        }, { passive: true });
+
+        canvas.addEventListener('touchend', (e) => {
+            if (!startPoint) return;
+
+            const touch = e.changedTouches[0];
+            const moved = Math.hypot(touch.clientX - startPoint.clientX, touch.clientY - startPoint.clientY);
+            startPoint = null;
+            if (moved > moveThreshold) return;
+
+            this._pendingCanvasTap = { target: canvas };
+            onTap({ clientX: touch.clientX, clientY: touch.clientY });
+        }, { passive: true });
     },
 
     // --- Sketch ---

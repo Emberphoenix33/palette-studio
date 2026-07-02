@@ -460,7 +460,11 @@ label {
 canvas {
     width: 100%;
     border-radius: 12px;
-    touch-action: none;
+    touch-action: manipulation;
+}
+
+.scrollable-canvas {
+    touch-action: pan-y pinch-zoom;
 }
 
 /* Grid number labels */
