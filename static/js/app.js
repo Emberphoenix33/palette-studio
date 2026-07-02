@@ -65,9 +65,7 @@ const App = {
 
     // --- Upload Screen ---
     setupUpload() {
-        const uploadZone = document.getElementById('upload-zone');
         const imageInput = document.getElementById('image-input');
-        uploadZone.addEventListener('click', () => imageInput.click());
         imageInput.addEventListener('change', () => {
             if (imageInput.files[0]) this.loadPhoto(imageInput.files[0]);
         });
@@ -75,9 +73,7 @@ const App = {
 
     // --- Collage ---
     setupCollage() {
-        const collageZone = document.getElementById('collage-zone');
         const collageInput = document.getElementById('collage-input');
-        collageZone.addEventListener('click', () => collageInput.click());
 
         collageInput.addEventListener('change', () => {
             const files = Array.from(collageInput.files);
@@ -591,10 +587,6 @@ const App = {
         });
 
         // Progress comparison setup
-        document.getElementById('progress-upload-btn').addEventListener('click', () => {
-            document.getElementById('progress-input').click();
-        });
-
         document.getElementById('progress-input').addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file) return;

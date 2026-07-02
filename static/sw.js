@@ -1,4 +1,4 @@
-const CACHE_NAME = 'drae-studio-v1';
+const CACHE_NAME = 'drae-studio-v2';
 const STATIC_ASSETS = [
     '/',
     '/static/css/style.css',
