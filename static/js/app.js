@@ -21,6 +21,7 @@ const App = {
     _progressImage: null,
 
     init() {
+        this.configureUploadInputs();
         this.setupUpload();
         this.setupCollage();
         this.setupTabs();
@@ -30,6 +31,21 @@ const App = {
         this.setupTimer();
         this.setupExport();
         this.addToast();
+    },
+
+    configureUploadInputs() {
+        const prefersLibraryPicker = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+        document.querySelectorAll('input[type="file"][data-capture]').forEach((input) => {
+            const captureMode = input.dataset.capture;
+            if (prefersLibraryPicker) {
+                input.removeAttribute('capture');
+                return;
+            }
+
+            input.setAttribute('capture', captureMode);
+        });
     },
 
     // --- Toast ---

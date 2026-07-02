@@ -21,7 +21,7 @@
         <div class="upload-card">
             <h2>Single Photo</h2>
             <div class="upload-zone" id="upload-zone">
-                <input type="file" id="image-input" accept="image/*" capture="environment" hidden>
+                <input type="file" id="image-input" accept="image/*" data-capture="environment" hidden>
                 <p>Tap to upload a pet photo</p>
             </div>
         </div>
@@ -83,7 +83,7 @@
             <div class="section-card">
                 <h2>Progress Comparison</h2>
                 <p class="hint">Upload a photo of your canvas to compare with the reference</p>
-                <input type="file" id="progress-input" accept="image/*" capture="environment" hidden>
+                <input type="file" id="progress-input" accept="image/*" data-capture="environment" hidden>
                 <button id="progress-upload-btn" class="btn btn-small">Upload Progress Photo</button>
                 <div id="progress-compare" class="hidden" style="margin-top:12px">
                     <div style="position:relative;overflow:hidden;border-radius:12px" id="compare-container">
