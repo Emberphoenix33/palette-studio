@@ -13,6 +13,33 @@ _rembg_session = new_session("u2net")
 
 # In-memory image store for composition overlay reuse
 image_store = {}
+subject_mask_store = {}
+
+
+def _bounded_store_set(store, key, value, limit=20):
+    store[key] = value
+    while len(store) > limit:
+        oldest = next(iter(store))
+        del store[oldest]
+
+
+def _drop_cached_image(image_id):
+    image_store.pop(image_id, None)
+    subject_mask_store.pop(image_id, None)
+
+
+def _get_subject_alpha(image_id, image_bytes, np):
+    cached = subject_mask_store.get(image_id)
+    if cached is not None:
+        return cached
+
+    from PIL import Image
+
+    result = _rembg_remove(image_bytes, session=_rembg_session)
+    img = Image.open(BytesIO(result)).convert("RGBA")
+    alpha = np.array(img)[:, :, 3]
+    _bounded_store_set(subject_mask_store, image_id, alpha)
+    return alpha
 
 
 def _parse_palette_hex(palette_hex):
@@ -95,12 +122,11 @@ def extract():
 
     # Store image for composition overlay
     image_id = str(uuid.uuid4())
-    image_store[image_id] = image_bytes
+    _bounded_store_set(image_store, image_id, image_bytes)
 
     # Keep store bounded
-    if len(image_store) > 20:
-        oldest = next(iter(image_store))
-        del image_store[oldest]
+    while len(image_store) > 20:
+        _drop_cached_image(next(iter(image_store)))
 
     return jsonify({"id": image_id, "colors": colors})
 
@@ -133,8 +159,10 @@ def get_colormap(image_id):
 
     palette_arr = np.array(palette_rgb, dtype=np.float64)
 
+    image_bytes = image_store[image_id]
+
     # Decode image
-    arr = np.frombuffer(image_store[image_id], np.uint8)
+    arr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
@@ -265,8 +293,10 @@ def get_sketch(image_id):
     thickness = max(1, min(4, thickness))
     outline_only = request.args.get("outline_only", "0").lower() in {"1", "true", "yes", "on"}
 
+    image_bytes = image_store[image_id]
+
     # Decode image
-    arr = np.frombuffer(image_store[image_id], np.uint8)
+    arr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
 
     # Resize for speed
@@ -279,10 +309,48 @@ def get_sketch(image_id):
 
     h_img, w_img = img.shape[:2]
 
+    subject_alpha = _get_subject_alpha(image_id, image_bytes, np)
+    subject_alpha = cv2.resize(subject_alpha, (w_img, h_img), interpolation=cv2.INTER_LINEAR)
+    subject_alpha = cv2.GaussianBlur(subject_alpha, (0, 0), sigmaX=1.4, sigmaY=1.4)
+    subject_mask = np.where(subject_alpha > 24, 255, 0).astype(np.uint8)
+
+    mask_coverage = float(np.count_nonzero(subject_mask)) / float(h_img * w_img)
+    use_subject_focus = 0.05 < mask_coverage < 0.92
+
+    if use_subject_focus:
+        subject_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        subject_mask = cv2.morphologyEx(subject_mask, cv2.MORPH_CLOSE, subject_kernel)
+        subject_mask = cv2.morphologyEx(subject_mask, cv2.MORPH_OPEN, subject_kernel)
+
+        expanded_mask = cv2.dilate(
+            subject_mask,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (19, 19)),
+            iterations=1,
+        )
+        contour_band = cv2.subtract(
+            cv2.dilate(subject_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11)), iterations=1),
+            cv2.erode(subject_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)), iterations=1),
+        )
+        subject_outline = cv2.morphologyEx(
+            subject_mask, cv2.MORPH_GRADIENT, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        )
+        touch_mask = cv2.dilate(
+            expanded_mask,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11)),
+            iterations=1,
+        )
+    else:
+        expanded_mask = None
+        contour_band = None
+        subject_outline = None
+        touch_mask = None
+
     # Step 1: Downscale then upscale to naturally remove fine texture (fur).
     # Higher suppression = stronger texture cleanup before edge detection.
     suppression_factor = (suppression - 1) / 9.0
     shrink_factor = 5.2 - (detail - 1) * 0.26 + suppression_factor * 2.3
+    if use_subject_focus:
+        shrink_factor *= 0.78
     shrink_factor = max(1.8, min(7.2, shrink_factor))
     small_h, small_w = int(img.shape[0] / shrink_factor), int(img.shape[1] / shrink_factor)
     small = cv2.resize(img, (small_w, small_h), interpolation=cv2.INTER_AREA)
@@ -290,6 +358,8 @@ def get_sketch(image_id):
 
     # Step 2: Bilateral smoothing preserves important forms while muting fur.
     n_passes = max(1, int(round((7 - detail * 0.5) + suppression_factor * 3)))
+    if use_subject_focus:
+        n_passes = max(1, n_passes - 1)
     bilateral_sigma = int(round(55 + suppression_factor * 40))
     for _ in range(n_passes):
         img_smooth = cv2.bilateralFilter(img_smooth, 9, bilateral_sigma, bilateral_sigma)
@@ -307,6 +377,9 @@ def get_sketch(image_id):
 
     low_thresh = int(max(10, (0.7 - detail_factor * 0.2) * median))
     high_thresh = int(min(255, max(low_thresh + 25, (1.35 - detail_factor * 0.1) * median + contrast * 0.35)))
+    if use_subject_focus:
+        low_thresh = max(8, int(low_thresh * 0.78))
+        high_thresh = min(255, max(low_thresh + 22, int(high_thresh * 0.84)))
     detail_edges = cv2.Canny(gray, low_thresh, high_thresh)
 
     shape_sigma = max(1.2, 4.1 - detail * 0.2 + suppression_factor * 0.8)
@@ -315,7 +388,15 @@ def get_sketch(image_id):
     shape_high = min(255, max(shape_low + 20, int(high_thresh * 0.9)))
     shape_edges = cv2.Canny(shape_gray, shape_low, shape_high)
 
-    edges = shape_edges if outline_only else cv2.bitwise_or(detail_edges, shape_edges)
+    if use_subject_focus:
+        subject_detail_edges = cv2.bitwise_and(detail_edges, expanded_mask)
+        subject_shape_edges = cv2.bitwise_and(shape_edges, expanded_mask)
+        contour_edges = cv2.bitwise_and(shape_edges, contour_band)
+        edges = subject_shape_edges if outline_only else cv2.bitwise_or(subject_detail_edges, subject_shape_edges)
+        edges = cv2.bitwise_or(edges, contour_edges)
+        edges = cv2.bitwise_or(edges, subject_outline)
+    else:
+        edges = shape_edges if outline_only else cv2.bitwise_or(detail_edges, shape_edges)
 
     # Step 5: Close tiny gaps and remove speckle components.
     close_size = 3 if outline_only else (3 if suppression >= 7 else 2)
@@ -332,8 +413,17 @@ def get_sketch(image_id):
         )
     cleaned = np.zeros_like(edges)
     for comp in range(1, num_labels):
-        if stats[comp, cv2.CC_STAT_AREA] >= min_component_area:
-            cleaned[labels == comp] = 255
+        area = stats[comp, cv2.CC_STAT_AREA]
+        if area < min_component_area:
+            continue
+
+        if use_subject_focus:
+            component = labels == comp
+            overlap = int(np.count_nonzero(touch_mask[component]))
+            if overlap < max(18, int(area * 0.12)):
+                continue
+
+        cleaned[labels == comp] = 255
     edges = cleaned
 
     # Step 6: Let the user thicken lines without reintroducing most of the noise.
