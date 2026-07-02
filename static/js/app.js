@@ -21,7 +21,6 @@ const App = {
     _progressImage: null,
 
     init() {
-        this.configureUploadInputs();
         this.setupUpload();
         this.setupCollage();
         this.setupTabs();
@@ -31,21 +30,6 @@ const App = {
         this.setupTimer();
         this.setupExport();
         this.addToast();
-    },
-
-    configureUploadInputs() {
-        const prefersLibraryPicker = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-
-        document.querySelectorAll('input[type="file"][data-capture]').forEach((input) => {
-            const captureMode = input.dataset.capture;
-            if (prefersLibraryPicker) {
-                input.removeAttribute('capture');
-                return;
-            }
-
-            input.setAttribute('capture', captureMode);
-        });
     },
 
     // --- Toast ---
@@ -66,9 +50,15 @@ const App = {
     // --- Upload Screen ---
     setupUpload() {
         const imageInput = document.getElementById('image-input');
-        imageInput.addEventListener('change', () => {
-            if (imageInput.files[0]) this.loadPhoto(imageInput.files[0]);
-        });
+        const imageCameraInput = document.getElementById('image-camera-input');
+        const handleImageSelection = (event) => {
+            const file = event.target.files[0];
+            if (file) this.loadPhoto(file);
+            event.target.value = '';
+        };
+
+        imageInput.addEventListener('change', handleImageSelection);
+        imageCameraInput.addEventListener('change', handleImageSelection);
     },
 
     // --- Collage ---
@@ -587,7 +577,7 @@ const App = {
         });
 
         // Progress comparison setup
-        document.getElementById('progress-input').addEventListener('change', (e) => {
+        const handleProgressSelection = (e) => {
             const file = e.target.files[0];
             if (!file) return;
             const url = URL.createObjectURL(file);
@@ -599,7 +589,11 @@ const App = {
                 this.renderComparison();
             };
             img.src = url;
-        });
+            e.target.value = '';
+        };
+
+        document.getElementById('progress-input').addEventListener('change', handleProgressSelection);
+        document.getElementById('progress-camera-input').addEventListener('change', handleProgressSelection);
 
         document.getElementById('compare-slider').addEventListener('input', () => {
             this.renderComparison();

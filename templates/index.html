@@ -20,10 +20,17 @@
     <div id="upload-screen" class="upload-screen">
         <div class="upload-card">
             <h2>Single Photo</h2>
-            <label class="upload-zone" id="upload-zone" for="image-input">
-                <input type="file" id="image-input" class="file-input-overlay" accept="image/*" data-capture="environment">
-                <p>Tap to upload a pet photo</p>
-            </label>
+            <p class="hint">Choose an existing photo or take a new one</p>
+            <div class="upload-actions">
+                <label class="btn file-trigger" for="image-input">
+                    <input type="file" id="image-input" class="file-input-overlay" accept="image/*">
+                    Choose From Library
+                </label>
+                <label class="btn btn-secondary file-trigger" for="image-camera-input">
+                    <input type="file" id="image-camera-input" class="file-input-overlay" accept="image/*" capture="environment">
+                    Use Camera
+                </label>
+            </div>
         </div>
         <div class="upload-card">
             <h2>Collage</h2>
@@ -83,10 +90,16 @@
             <div class="section-card">
                 <h2>Progress Comparison</h2>
                 <p class="hint">Upload a photo of your canvas to compare with the reference</p>
-                <label id="progress-upload-btn" class="btn btn-small file-trigger" for="progress-input">
-                    <input type="file" id="progress-input" class="file-input-overlay" accept="image/*" data-capture="environment">
-                    Upload Progress Photo
-                </label>
+                <div class="upload-actions upload-actions-small">
+                    <label id="progress-upload-btn" class="btn btn-small file-trigger" for="progress-input">
+                        <input type="file" id="progress-input" class="file-input-overlay" accept="image/*">
+                        Choose From Library
+                    </label>
+                    <label class="btn btn-small btn-secondary file-trigger" for="progress-camera-input">
+                        <input type="file" id="progress-camera-input" class="file-input-overlay" accept="image/*" capture="environment">
+                        Use Camera
+                    </label>
+                </div>
                 <div id="progress-compare" class="hidden" style="margin-top:12px">
                     <div style="position:relative;overflow:hidden;border-radius:12px" id="compare-container">
                         <canvas id="compare-canvas"></canvas>

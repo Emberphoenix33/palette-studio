@@ -245,6 +245,12 @@ main {
     min-height: 36px;
 }
 
+.btn-secondary {
+    background: var(--bg);
+    color: var(--text);
+    border: 1.5px solid var(--border);
+}
+
 /* Reference toolbar */
 .ref-toolbar {
     display: flex;
@@ -324,6 +330,17 @@ main {
     opacity: 0;
     cursor: pointer;
     font-size: 0;
+}
+
+.upload-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.upload-actions-small {
+    justify-content: flex-start;
 }
 
 /* Palette rows */
