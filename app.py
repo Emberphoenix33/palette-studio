@@ -321,6 +321,13 @@ def get_sketch(image_id):
         subject_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
         subject_mask = cv2.morphologyEx(subject_mask, cv2.MORPH_CLOSE, subject_kernel)
         subject_mask = cv2.morphologyEx(subject_mask, cv2.MORPH_OPEN, subject_kernel)
+        interior_mask = cv2.erode(
+            subject_mask,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)),
+            iterations=1,
+        )
+        if not np.any(interior_mask):
+            interior_mask = subject_mask.copy()
 
         expanded_mask = cv2.dilate(
             subject_mask,
@@ -340,6 +347,7 @@ def get_sketch(image_id):
             iterations=1,
         )
     else:
+        interior_mask = None
         expanded_mask = None
         contour_band = None
         subject_outline = None
@@ -389,10 +397,25 @@ def get_sketch(image_id):
     shape_edges = cv2.Canny(shape_gray, shape_low, shape_high)
 
     if use_subject_focus:
-        subject_detail_edges = cv2.bitwise_and(detail_edges, expanded_mask)
+        subject_detail_edges = cv2.bitwise_and(detail_edges, interior_mask)
+        feature_labels = cv2.connectedComponentsWithStats(subject_detail_edges, connectivity=8)
+        _, feature_components, feature_stats, _ = feature_labels
+        filtered_detail_edges = np.zeros_like(subject_detail_edges)
+        min_feature_area = max(18, int((h_img * w_img) / (6200 + detail * 260)))
+        min_feature_span = max(10, int(max(h_img, w_img) * 0.04))
+        for comp in range(1, feature_stats.shape[0]):
+            area = feature_stats[comp, cv2.CC_STAT_AREA]
+            width = feature_stats[comp, cv2.CC_STAT_WIDTH]
+            height = feature_stats[comp, cv2.CC_STAT_HEIGHT]
+            if area < min_feature_area:
+                continue
+            if max(width, height) < min_feature_span:
+                continue
+            filtered_detail_edges[feature_components == comp] = 255
+
         subject_shape_edges = cv2.bitwise_and(shape_edges, expanded_mask)
         contour_edges = cv2.bitwise_and(shape_edges, contour_band)
-        edges = subject_shape_edges if outline_only else cv2.bitwise_or(subject_detail_edges, subject_shape_edges)
+        edges = subject_shape_edges if outline_only else cv2.bitwise_or(filtered_detail_edges, subject_shape_edges)
         edges = cv2.bitwise_or(edges, contour_edges)
         edges = cv2.bitwise_or(edges, subject_outline)
     else:
