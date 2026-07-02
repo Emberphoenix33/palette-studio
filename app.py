@@ -7,8 +7,73 @@ from color_extract import extract_palette
 
 app = Flask(__name__)
 
+# Load rembg session once at startup to avoid reloading the model per request
+from rembg import new_session, remove as _rembg_remove
+_rembg_session = new_session("u2net")
+
 # In-memory image store for composition overlay reuse
 image_store = {}
+
+
+def _parse_palette_hex(palette_hex):
+    palette_rgb = []
+    for h in palette_hex.split(","):
+        h = h.strip().lstrip("#")
+        if len(h) != 6:
+            continue
+        try:
+            palette_rgb.append([int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)])
+        except ValueError:
+            continue
+    return palette_rgb
+
+
+def _merge_small_regions(label_map, simplify_level, n_colors, cv2, np):
+    if simplify_level <= 0:
+        return label_map
+
+    merged = label_map.copy()
+    height, width = merged.shape
+    min_area = max(24, int((height * width) * (0.00035 + simplify_level * 0.00022)))
+    kernel = np.ones((3, 3), dtype=np.uint8)
+
+    for color_idx in range(n_colors):
+        mask = (merged == color_idx).astype(np.uint8)
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+
+        for comp in range(1, num_labels):
+            area = stats[comp, cv2.CC_STAT_AREA]
+            if area >= min_area:
+                continue
+
+            component = labels == comp
+            expanded = cv2.dilate(component.astype(np.uint8), kernel, iterations=1).astype(bool)
+            neighbor_colors = merged[expanded & ~component]
+            if neighbor_colors.size == 0:
+                continue
+
+            counts = np.bincount(neighbor_colors, minlength=n_colors)
+            counts[color_idx] = 0
+            replacement = int(np.argmax(counts))
+            if counts[replacement] > 0:
+                merged[component] = replacement
+
+    return merged
+
+
+def _simplify_label_map(label_map, simplify_level, n_colors, cv2, np):
+    if simplify_level <= 0:
+        return label_map
+
+    working = label_map.astype(np.uint8)
+    kernel_size = 3 if simplify_level < 6 else 5
+
+    blur_passes = 1 if simplify_level < 4 else 2
+    for _ in range(blur_passes):
+        working = cv2.medianBlur(working, kernel_size)
+
+    working = _merge_small_regions(working.astype(np.int32), simplify_level, n_colors, cv2, np)
+    return working.astype(np.int32)
 
 
 @app.route("/")
@@ -60,11 +125,8 @@ def get_colormap(image_id):
     if not palette_hex:
         return jsonify({"error": "No colors provided"}), 400
 
-    palette_rgb = []
-    for h in palette_hex.split(","):
-        h = h.strip().lstrip("#")
-        if len(h) == 6:
-            palette_rgb.append([int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)])
+    simplify_level = max(0, min(10, request.args.get("simplify", 5, type=int)))
+    palette_rgb = _parse_palette_hex(palette_hex)
 
     if not palette_rgb:
         return jsonify({"error": "Invalid colors"}), 400
@@ -84,6 +146,11 @@ def get_colormap(image_id):
         img_rgb = cv2.resize(img_rgb, (int(w * ratio), int(h * ratio)),
                              interpolation=cv2.INTER_AREA)
 
+    if simplify_level > 0:
+        diameter = 5 + simplify_level
+        sigma = 18 + simplify_level * 4
+        img_rgb = cv2.bilateralFilter(img_rgb, diameter, sigma, sigma)
+
     # Convert image and palette to LAB for perceptually accurate matching
     img_lab = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2LAB).astype(np.float64)
     palette_rgb_arr = np.array(palette_rgb, dtype=np.uint8).reshape(1, -1, 3)
@@ -98,10 +165,11 @@ def get_colormap(image_id):
     nearest = np.argmin(distances, axis=0)
 
     # Reconstruct image using palette colors + original luminance for detail
-    mapped = palette_arr[nearest].astype(np.float64)
     h_img, w_img = img_rgb.shape[:2]
-    mapped_2d = mapped.reshape(h_img, w_img, 3)
     nearest_2d = nearest.reshape(h_img, w_img)
+
+    nearest_2d = _simplify_label_map(nearest_2d, simplify_level, len(palette_rgb), cv2, np)
+    mapped_2d = palette_arr[nearest_2d].astype(np.float64)
 
     # Get original pixel luminance relative to its palette color's luminance
     # This preserves shadows, highlights, and form
@@ -191,6 +259,11 @@ def get_sketch(image_id):
     # Detail level: 1 (minimal/clean) to 10 (maximum detail)
     detail = request.args.get("detail", 5, type=int)
     detail = max(1, min(10, detail))
+    suppression = request.args.get("suppression", 5, type=int)
+    suppression = max(1, min(10, suppression))
+    thickness = request.args.get("thickness", 2, type=int)
+    thickness = max(1, min(4, thickness))
+    outline_only = request.args.get("outline_only", "0").lower() in {"1", "true", "yes", "on"}
 
     # Decode image
     arr = np.frombuffer(image_store[image_id], np.uint8)
@@ -204,39 +277,74 @@ def get_sketch(image_id):
         img = cv2.resize(img, (int(w * ratio), int(h * ratio)),
                          interpolation=cv2.INTER_AREA)
 
-    # Step 1: Downscale then upscale to naturally remove fine texture (fur)
-    # Lower detail = more aggressive downscale = less fur noise
-    shrink_factor = 6 - (detail - 1) * 0.4  # 6x down to 2.4x
-    shrink_factor = max(2, shrink_factor)
+    h_img, w_img = img.shape[:2]
+
+    # Step 1: Downscale then upscale to naturally remove fine texture (fur).
+    # Higher suppression = stronger texture cleanup before edge detection.
+    suppression_factor = (suppression - 1) / 9.0
+    shrink_factor = 5.2 - (detail - 1) * 0.26 + suppression_factor * 2.3
+    shrink_factor = max(1.8, min(7.2, shrink_factor))
     small_h, small_w = int(img.shape[0] / shrink_factor), int(img.shape[1] / shrink_factor)
     small = cv2.resize(img, (small_w, small_h), interpolation=cv2.INTER_AREA)
     img_smooth = cv2.resize(small, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_CUBIC)
 
-    # Step 2: Multiple bilateral filter passes to smooth remaining texture
-    # while preserving strong edges (silhouette, eyes, nose)
-    n_passes = max(1, 8 - detail)  # 7 passes at detail=1, 1 pass at detail=8+
+    # Step 2: Bilateral smoothing preserves important forms while muting fur.
+    n_passes = max(1, int(round((7 - detail * 0.5) + suppression_factor * 3)))
+    bilateral_sigma = int(round(55 + suppression_factor * 40))
     for _ in range(n_passes):
-        img_smooth = cv2.bilateralFilter(img_smooth, 9, 75, 75)
+        img_smooth = cv2.bilateralFilter(img_smooth, 9, bilateral_sigma, bilateral_sigma)
 
-    # Step 3: Convert to grayscale
+    # Step 3: Convert to grayscale and normalize local contrast.
     gray = cv2.cvtColor(img_smooth, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
 
-    # Step 4: Canny edge detection
-    # Lower detail = higher thresholds = fewer edges
-    low_thresh = int(80 - (detail - 1) * 6)    # 80 down to 26
-    high_thresh = int(160 - (detail - 1) * 10)  # 160 down to 70
-    edges = cv2.Canny(gray, low_thresh, high_thresh)
+    # Step 4: Build edges from both texture-preserving and silhouette-preserving passes.
+    median = float(np.median(gray))
+    contrast = float(np.std(gray))
+    detail_factor = detail / 10.0
 
-    # Step 5: Dilate slightly to make lines visible
-    kernel = np.ones((2, 2), np.uint8)
-    edges = cv2.dilate(edges, kernel, iterations=1)
+    low_thresh = int(max(10, (0.7 - detail_factor * 0.2) * median))
+    high_thresh = int(min(255, max(low_thresh + 25, (1.35 - detail_factor * 0.1) * median + contrast * 0.35)))
+    detail_edges = cv2.Canny(gray, low_thresh, high_thresh)
 
-    # Step 6: Clean up tiny noise with morphological open
-    if detail < 5:
-        kernel_clean = np.ones((2, 2), np.uint8)
-        edges = cv2.morphologyEx(edges, cv2.MORPH_OPEN, kernel_clean)
+    shape_sigma = max(1.2, 4.1 - detail * 0.2 + suppression_factor * 0.8)
+    shape_gray = cv2.GaussianBlur(gray, (0, 0), sigmaX=shape_sigma, sigmaY=shape_sigma)
+    shape_low = max(10, int(low_thresh * 0.75))
+    shape_high = min(255, max(shape_low + 20, int(high_thresh * 0.9)))
+    shape_edges = cv2.Canny(shape_gray, shape_low, shape_high)
 
-    # Step 7: Invert — dark lines on white background
+    edges = shape_edges if outline_only else cv2.bitwise_or(detail_edges, shape_edges)
+
+    # Step 5: Close tiny gaps and remove speckle components.
+    close_size = 3 if outline_only else (3 if suppression >= 7 else 2)
+    close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (close_size, close_size))
+    edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, close_kernel)
+
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(edges, connectivity=8)
+    if outline_only:
+        min_component_area = max(24, int((h_img * w_img) / (1100 + detail * 110)))
+    else:
+        min_component_area = max(
+            12,
+            int((h_img * w_img) / (2200 + detail * 180 - suppression_factor * 700))
+        )
+    cleaned = np.zeros_like(edges)
+    for comp in range(1, num_labels):
+        if stats[comp, cv2.CC_STAT_AREA] >= min_component_area:
+            cleaned[labels == comp] = 255
+    edges = cleaned
+
+    # Step 6: Let the user thicken lines without reintroducing most of the noise.
+    if thickness > 1:
+        kernel_size = thickness if outline_only else 1 + thickness
+        dilate_kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (kernel_size, kernel_size)
+        )
+        edges = cv2.dilate(edges, dilate_kernel, iterations=1)
+
+    # Step 7: Invert — dark lines on white background.
     result = 255 - edges
 
     _, buf = cv2.imencode(".png", result)
@@ -339,6 +447,33 @@ def get_valuemap(image_id):
 
     _, buf = cv2.imencode(".png", result_bgr)
     return send_file(BytesIO(buf.tobytes()), mimetype="image/png")
+
+
+@app.route("/remove-bg", methods=["POST"])
+def remove_bg():
+    if "image" not in request.files:
+        return jsonify({"error": "No image uploaded"}), 400
+
+    from PIL import Image
+    import numpy as np
+
+    image_bytes = request.files["image"].read()
+    result = _rembg_remove(image_bytes, session=_rembg_session)
+
+    # Crop to bounding box of non-transparent pixels
+    img = Image.open(BytesIO(result)).convert("RGBA")
+    alpha = np.array(img)[:, :, 3]
+    rows = np.any(alpha > 0, axis=1)
+    cols = np.any(alpha > 0, axis=0)
+    if rows.any():
+        rmin, rmax = np.where(rows)[0][[0, -1]]
+        cmin, cmax = np.where(cols)[0][[0, -1]]
+        img = img.crop((cmin, rmin, cmax + 1, rmax + 1))
+
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return send_file(buf, mimetype="image/png")
 
 
 if __name__ == "__main__":

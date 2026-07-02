@@ -1,0 +1,23 @@
+[Unit]
+Description=Palette Studio Flask App
+After=network.target
+
+[Service]
+User=palette
+Group=palette
+WorkingDirectory=/opt/palette-studio
+Environment="PORT=5050"
+Environment="NUMBA_DISABLE_JIT=1"
+Environment="NUMBA_CACHE_DIR=/opt/palette-studio/.numba_cache"
+ExecStart=/opt/palette-studio/.venv/bin/gunicorn \
+    --workers 1 \
+    --bind 127.0.0.1:5050 \
+    --timeout 120 \
+    --access-logfile /var/log/palette-studio-access.log \
+    --error-logfile /var/log/palette-studio-error.log \
+    app:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

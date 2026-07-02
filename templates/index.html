@@ -30,15 +30,16 @@
             <p class="hint">Combine multiple pets — backgrounds removed automatically</p>
             <div class="upload-zone" id="collage-zone">
                 <input type="file" id="collage-input" accept="image/*" multiple hidden>
-                <p>Tap to select 2–4 photos</p>
+                <p>Tap to select 2–10 photos</p>
             </div>
             <div id="collage-preview" class="hidden">
                 <canvas id="collage-canvas" style="touch-action:none"></canvas>
+                <div id="layer-panel" class="layer-panel"></div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:8px">
                     <button id="collage-use-btn" class="btn">Use This Collage</button>
                     <button id="collage-reset-btn" class="btn btn-small">Reset</button>
                 </div>
-                <p class="hint" style="margin-top:8px">Drag pets to position. Pinch to resize. Tap to select &amp; bring forward.</p>
+                <p class="hint" style="margin-top:8px">Drag to position. Pinch to resize. Tap to select.</p>
             </div>
         </div>
     </div>
@@ -55,6 +56,9 @@
                 </div>
                 <div class="ref-controls hidden" id="sketch-controls">
                     <label>Detail: <input type="range" id="sketch-detail" min="1" max="10" value="5"><span id="sketch-detail-val">5</span></label>
+                    <label>Texture suppression: <input type="range" id="sketch-suppression" min="1" max="10" value="5"><span id="sketch-suppression-val">5</span></label>
+                    <label>Line weight: <input type="range" id="sketch-thickness" min="1" max="4" value="2"><span id="sketch-thickness-val">2</span></label>
+                    <label><input type="checkbox" id="sketch-outline-only"> Outline only</label>
                 </div>
                 <div class="ref-controls">
                     <label>Grid: <input type="range" id="grid-divisions" min="2" max="12" value="4"><span id="grid-divisions-val">4</span></label>
@@ -129,8 +133,11 @@
             <div class="section-card">
                 <h2>Color Map</h2>
                 <p class="hint">Shows where each palette color goes on the photo</p>
-                <button id="colormap-btn" class="btn btn-small">Generate Color Map</button>
-                <button id="original-btn" class="btn btn-small hidden">Show Original</button>
+                <div class="extract-controls">
+                    <label>Simplify: <input type="range" id="colormap-simplify" min="0" max="10" value="5"><span id="colormap-simplify-val">5</span></label>
+                    <button id="colormap-btn" class="btn btn-small">Generate Color Map</button>
+                    <button id="original-btn" class="btn btn-small hidden">Show Original</button>
+                </div>
                 <div id="colormap-container" class="hidden">
                     <canvas id="colormap-canvas"></canvas>
                     <div id="colormap-legend" class="colormap-legend"></div>

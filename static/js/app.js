@@ -6,9 +6,10 @@ const App = {
     _colormapImg: null,
     _showingOriginal: false,
     _originalImage: null,
-    _sketchImage: null,
+    _sketchCache: {},
     _sketchMode: false,
     _sketchLoading: false,
+    _sketchRequestId: 0,
     _collageImages: [],
     _collagePets: null,
     _collageActive: null,
@@ -68,8 +69,8 @@ const App = {
                 this.showToast('Select at least 2 photos');
                 return;
             }
-            if (files.length > 4) {
-                this.showToast('Maximum 4 photos');
+            if (files.length > 10) {
+                this.showToast('Maximum 10 photos');
                 return;
             }
             this.processCollage(files);
@@ -92,12 +93,14 @@ const App = {
         this.showToast('Removing backgrounds (first time may take a moment)...');
         document.getElementById('collage-zone').querySelector('p').textContent = 'Processing...';
 
-        // Client-side background removal using @imgly/background-removal
-        const { removeBackground } = await import('https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.5.5/+esm');
         const cutouts = [];
         for (const file of files) {
             try {
-                const blob = await removeBackground(file);
+                const fd = new FormData();
+                fd.append('image', file);
+                const resp = await fetch('/remove-bg', { method: 'POST', body: fd });
+                if (!resp.ok) throw new Error('Server error');
+                const blob = await resp.blob();
                 const url = URL.createObjectURL(blob);
                 const img = await new Promise((resolve, reject) => {
                     const i = new Image();
@@ -108,12 +111,12 @@ const App = {
                 cutouts.push(img);
             } catch (err) {
                 this.showToast('Background removal failed');
-                document.getElementById('collage-zone').querySelector('p').textContent = 'Tap to select 2–4 photos';
+                document.getElementById('collage-zone').querySelector('p').textContent = 'Tap to select 2–10 photos';
                 return;
             }
         }
 
-        document.getElementById('collage-zone').querySelector('p').textContent = 'Tap to select 2–4 photos';
+        document.getElementById('collage-zone').querySelector('p').textContent = 'Tap to select 2–10 photos';
         this._collageImages = cutouts;
         this.renderCollagePreview();
     },
@@ -177,6 +180,82 @@ const App = {
             ctx.strokeRect(p.x, p.y, p.w, p.h);
             ctx.setLineDash([]);
         }
+
+        this._renderLayerPanel();
+    },
+
+    _normalizeZ() {
+        const sorted = [...this._collagePets].sort((a, b) => a.z - b.z);
+        sorted.forEach((p, i) => { p.z = i; });
+    },
+
+    _renderLayerPanel() {
+        const panel = document.getElementById('layer-panel');
+        if (!this._collagePets || !this._collagePets.length) return;
+
+        panel.innerHTML = '';
+
+        // Show top layer first
+        const order = this._collagePets
+            .map((pet, idx) => ({ pet, idx }))
+            .sort((a, b) => b.pet.z - a.pet.z);
+
+        order.forEach(({ pet, idx }) => {
+            const item = document.createElement('div');
+            item.className = 'layer-item' + (idx === this._collageActive ? ' layer-active' : '');
+
+            // Thumbnail
+            const thumb = document.createElement('canvas');
+            thumb.width = 44;
+            thumb.height = 44;
+            const tctx = thumb.getContext('2d');
+            const ratio = Math.min(44 / pet.img.width, 44 / pet.img.height);
+            const tw = pet.img.width * ratio;
+            const th = pet.img.height * ratio;
+            tctx.drawImage(pet.img, (44 - tw) / 2, (44 - th) / 2, tw, th);
+            item.appendChild(thumb);
+
+            // Select on tap
+            item.addEventListener('click', () => {
+                this._collageActive = idx;
+                this._drawCollage();
+            });
+
+            // Up/down buttons
+            const btns = document.createElement('div');
+            btns.className = 'layer-btns';
+
+            const btnUp = document.createElement('button');
+            btnUp.textContent = '▲';
+            btnUp.className = 'layer-btn';
+            btnUp.title = 'Bring forward';
+            btnUp.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const above = this._collagePets
+                    .filter(p => p.z > pet.z)
+                    .sort((a, b) => a.z - b.z)[0];
+                if (above) { const tmp = above.z; above.z = pet.z; pet.z = tmp; }
+                this._drawCollage();
+            });
+
+            const btnDown = document.createElement('button');
+            btnDown.textContent = '▼';
+            btnDown.className = 'layer-btn';
+            btnDown.title = 'Send back';
+            btnDown.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const below = this._collagePets
+                    .filter(p => p.z < pet.z)
+                    .sort((a, b) => b.z - a.z)[0];
+                if (below) { const tmp = below.z; below.z = pet.z; pet.z = tmp; }
+                this._drawCollage();
+            });
+
+            btns.appendChild(btnUp);
+            btns.appendChild(btnDown);
+            item.appendChild(btns);
+            panel.appendChild(item);
+        });
     },
 
     _collageHitTest(cx, cy) {
@@ -322,8 +401,9 @@ const App = {
         Composition.loadImage(file, () => {
             // Store original and reset sketch state
             this._originalImage = Composition.image;
-            this._sketchImage = null;
+            this._sketchCache = {};
             this._sketchMode = false;
+            this._sketchLoading = false;
             document.getElementById('sketch-btn').style.background = '';
             document.getElementById('sketch-controls').classList.add('hidden');
 
@@ -415,7 +495,31 @@ const App = {
         sketchDetail.addEventListener('input', () => {
             sketchDetailVal.textContent = sketchDetail.value;
             if (this._sketchMode) {
-                this._sketchImage = null; // force re-fetch with new detail
+                this.loadSketch();
+            }
+        });
+
+        const sketchSuppression = document.getElementById('sketch-suppression');
+        const sketchSuppressionVal = document.getElementById('sketch-suppression-val');
+        sketchSuppression.addEventListener('input', () => {
+            sketchSuppressionVal.textContent = sketchSuppression.value;
+            if (this._sketchMode) {
+                this.loadSketch();
+            }
+        });
+
+        const sketchThickness = document.getElementById('sketch-thickness');
+        const sketchThicknessVal = document.getElementById('sketch-thickness-val');
+        sketchThickness.addEventListener('input', () => {
+            sketchThicknessVal.textContent = sketchThickness.value;
+            if (this._sketchMode) {
+                this.loadSketch();
+            }
+        });
+
+        const sketchOutlineOnly = document.getElementById('sketch-outline-only');
+        sketchOutlineOnly.addEventListener('change', () => {
+            if (this._sketchMode) {
                 this.loadSketch();
             }
         });
@@ -539,19 +643,24 @@ const App = {
         }
 
         const detail = document.getElementById('sketch-detail').value;
+        const suppression = document.getElementById('sketch-suppression').value;
+        const thickness = document.getElementById('sketch-thickness').value;
+        const outlineOnly = document.getElementById('sketch-outline-only').checked ? '1' : '0';
+        const cacheKey = `${this._imageId}:${detail}:${suppression}:${thickness}:${outlineOnly}`;
 
         // Use cached sketch if available
-        if (this._sketchImage) {
-            Composition.image = this._sketchImage;
+        if (this._sketchCache[cacheKey]) {
+            Composition.image = this._sketchCache[cacheKey];
             this.renderRef();
             return;
         }
 
+        const requestId = ++this._sketchRequestId;
         this._sketchLoading = true;
         this.showToast('Generating sketch...');
 
         try {
-            const resp = await fetch(`/sketch/${this._imageId}?detail=${detail}`);
+            const resp = await fetch(`/sketch/${this._imageId}?detail=${detail}&suppression=${suppression}&thickness=${thickness}&outline_only=${outlineOnly}`);
             if (!resp.ok) throw new Error();
 
             const blob = await resp.blob();
@@ -560,14 +669,18 @@ const App = {
             const img = new Image();
             img.onload = () => {
                 URL.revokeObjectURL(url);
-                this._sketchImage = img;
+                if (requestId !== this._sketchRequestId) return;
+                this._sketchCache[cacheKey] = img;
                 this._sketchLoading = false;
+                if (!this._sketchMode) return;
                 Composition.image = img;
                 this.renderRef();
             };
             img.src = url;
         } catch (err) {
-            this._sketchLoading = false;
+            if (requestId === this._sketchRequestId) {
+                this._sketchLoading = false;
+            }
             this.showToast('Sketch generation failed');
         }
     },
@@ -593,6 +706,12 @@ const App = {
 
         document.getElementById('original-btn').addEventListener('click', () => {
             this.toggleOriginal();
+        });
+
+        const colormapSimplify = document.getElementById('colormap-simplify');
+        const colormapSimplifyVal = document.getElementById('colormap-simplify-val');
+        colormapSimplify.addEventListener('input', () => {
+            colormapSimplifyVal.textContent = colormapSimplify.value;
         });
 
         // Eyedropper — switches to Reference tab to pick, then comes back
@@ -724,11 +843,12 @@ const App = {
         }
 
         const btn = document.getElementById('colormap-btn');
+        const simplify = document.getElementById('colormap-simplify').value;
         btn.textContent = 'Generating...';
 
         const colors = this.activePalette.join(',');
         try {
-            const resp = await fetch(`/colormap/${this._imageId}?colors=${encodeURIComponent(colors)}`);
+            const resp = await fetch(`/colormap/${this._imageId}?colors=${encodeURIComponent(colors)}&simplify=${encodeURIComponent(simplify)}`);
             if (!resp.ok) throw new Error();
 
             const blob = await resp.blob();
@@ -790,6 +910,11 @@ const App = {
                     item.appendChild(label);
                     legend.appendChild(item);
                 });
+            };
+            img.onerror = () => {
+                URL.revokeObjectURL(url);
+                this.showToast('Color map failed');
+                btn.textContent = 'Generate Color Map';
             };
             img.src = url;
         } catch (err) {

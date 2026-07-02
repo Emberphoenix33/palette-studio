@@ -110,6 +110,67 @@ header h1 {
     margin: 4px;
 }
 
+.layer-panel {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 8px 4px;
+    margin-top: 8px;
+    -webkit-overflow-scrolling: touch;
+}
+
+.layer-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 10px;
+    border: 2px solid var(--border);
+    background: var(--card-bg);
+    transition: border-color 0.15s;
+}
+
+.layer-item.layer-active {
+    border-color: var(--accent);
+    background: #f3eeff;
+}
+
+.layer-item canvas {
+    width: 44px;
+    height: 44px;
+    border-radius: 6px;
+    border: none;
+    display: block;
+}
+
+.layer-btns {
+    display: flex;
+    gap: 4px;
+}
+
+.layer-btn {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    width: 24px;
+    height: 24px;
+    font-size: 10px;
+    cursor: pointer;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.layer-btn:active {
+    background: var(--accent-light);
+}
+
 /* Main content */
 main {
     position: fixed;
